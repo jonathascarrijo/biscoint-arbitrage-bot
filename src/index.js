@@ -74,7 +74,7 @@ const checkInterval = async () => {
   }
 };
 
-async function tradeCycle(ignoreBurst) {
+async function tradeCycle(bursting) {
   try {
     const buyOffer = await bc.offer({
       amount,
@@ -120,25 +120,31 @@ async function tradeCycle(ignoreBurst) {
 
         handleMessage(`Success, profit: + ${profit.toFixed(3)}%`);
         play();
-        if (!ignoreBurst && burstsLeft) {
+        if (!bursting && burstsLeft) {
           console.log(`bursting ${burstsLeft} times`);
-          for(let i=burstsLeft; i>0; i--, burstsLeft--) {
-            await tradeCycle(true);
+          for(; burstsLeft>0; burstsLeft--) {
+            if (!await tradeCycle(true)) {
+              break;
+            }
             console.log(`burstsLeft: ${burstsLeft - 1}`);
           }
         }
+        return true;
       } catch (error) {
         handleMessage('Error on confirm offer', 'error');
         console.error(error);
       }
     } else {
-      burstsLeft = Math.min(burstMax, burstsLeft + 1);
+      if (!bursting) {
+        burstsLeft = Math.min(burstMax, burstsLeft + 1);
+      }
       console.log(`burstsLeft: ${burstsLeft}`);
     }
   } catch (error) {
     handleMessage('Error on get offer', 'error');
     console.error(error);
   }
+  return false;
 }
 
 const startTrading = async () => {
