@@ -14,6 +14,7 @@ const config = {
   playSound: false,
   burst: true,
   simulation: true,
+  helperKeys: [],
 };
 
 try {

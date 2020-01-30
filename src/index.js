@@ -6,10 +6,10 @@ import config from './config.js';
 // read the configurations
 let {
   apiKey, apiSecret, amount, amountCurrency, initialBuy, minProfitPercent, intervalSeconds, playSound, burst,
-  simulation,
+  simulation, helperKeys,
 } = config;
 
-let bc, lastTrade = 0, isQuote;
+let bc, lastTrade = 0, isQuote, helpers = [], pollerIndex = 0;
 
 const init = () => {
   if (!apiKey) {
@@ -33,6 +33,11 @@ const init = () => {
   bc = new Biscoint({
     apiKey: config.apiKey,
     apiSecret: config.apiSecret
+  });
+
+  _.each(helperKeys, (hk) => {
+    const { apiKey, apiSecret } = hk;
+    helpers.push(new Biscoint({ apiKey, apiSecret }));
   });
 };
 
@@ -75,14 +80,20 @@ const checkInterval = async () => {
 };
 
 async function tradeCycle(bursting) {
+  let poller;
+  if (pollerIndex === 0) {
+    poller = bc;
+  } else {
+    poller = helpers[pollerIndex - 1];
+  }
   try {
-    const buyOffer = await bc.offer({
+    const buyOffer = await poller.offer({
       amount,
       isQuote,
       op: 'buy',
     });
 
-    const sellOffer = await bc.offer({
+    const sellOffer = await poller.offer({
       amount,
       isQuote,
       op: 'sell',
@@ -93,6 +104,11 @@ async function tradeCycle(bursting) {
     if (
       profit >= minProfitPercent
     ) {
+      if (pollerIndex > 0) {
+        pollerIndex = 0;
+        burstsLeft = Math.max(0, burstsLeft -1);
+        return await tradeCycle();
+      }
       try {
         let firstOffer, secondOffer;
 
@@ -120,7 +136,7 @@ async function tradeCycle(bursting) {
 
         handleMessage(`Success, profit: + ${profit.toFixed(3)}%`);
         play();
-        if (!bursting && burstsLeft) {
+        if (burst && !bursting && burstsLeft) {
           console.log(`bursting ${burstsLeft} times`);
           for(; burstsLeft>0; burstsLeft--) {
             if (!await tradeCycle(true)) {
@@ -137,7 +153,10 @@ async function tradeCycle(bursting) {
     } else {
       if (!bursting) {
         burstsLeft = Math.min(burstMax, burstsLeft + 1);
+        pollerIndex = (pollerIndex + 1) % (helpers.length + 1);
+        console.log(`next poller ${pollerIndex}`);
       }
+
       console.log(`burstsLeft: ${burstsLeft}`);
     }
   } catch (error) {
@@ -150,7 +169,7 @@ async function tradeCycle(bursting) {
 const startTrading = async () => {
   handleMessage('Starting trades');
   await tradeCycle();
-  setInterval(tradeCycle, intervalSeconds * 1000);
+  setInterval(tradeCycle, (intervalSeconds / (helpers.length + 1) * 1000));
 };
 
 // -- UTILITY FUNCTIONS --
