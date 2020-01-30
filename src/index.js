@@ -105,7 +105,7 @@ async function tradeCycle(ignoreBurst) {
         }
 
         if (simulation) {
-         handleMessage('Would execute arbitrage if simulation mode was not enabled')
+          handleMessage('Would execute arbitrage if simulation mode was not enabled');
         } else {
           await bc.confirmOffer({
             offerId: firstOffer.offerId,
