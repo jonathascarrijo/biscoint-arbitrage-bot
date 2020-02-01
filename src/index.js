@@ -1,6 +1,7 @@
 import Biscoint from 'biscoint-api-node';
 import _ from 'lodash';
 import player from 'play-sound';
+import moment from 'moment';
 import config from './config.js';
 
 // read the configurations
@@ -79,96 +80,112 @@ const checkInterval = async () => {
 };
 
 async function tradeCycle(bursting) {
-  let poller;
-  if (pollerIndex === 0) {
+  let poller, isMain = false;
+  if (bursting || pollerIndex === 0) {
+    if (helpers.length) {
+      console.log('polling with main');
+    }
     poller = bc;
+    isMain = true;
   } else {
+    console.log(`polling with helper ${pollerIndex}`);
     poller = helpers[pollerIndex - 1];
   }
+  let buyOffer, sellOffer, profit;
   try {
-    const buyOffer = await poller.offer({
+    buyOffer = await poller.offer({
       amount,
       isQuote,
       op: 'buy',
     });
 
-    const sellOffer = await poller.offer({
+    sellOffer = await poller.offer({
       amount,
       isQuote,
       op: 'sell',
     });
 
-    const profit = percent(buyOffer.efPrice, sellOffer.efPrice);
+    profit = percent(buyOffer.efPrice, sellOffer.efPrice);
     handleMessage(`Calculated profit: ${profit.toFixed(3)}%`);
-    if (
-      profit >= minProfitPercent
-    ) {
-      if (pollerIndex > 0) {
-        pollerIndex = 0;
-        burstsLeft = Math.max(0, burstsLeft -1);
-        return await tradeCycle();
-      }
-      try {
-        let firstOffer, secondOffer;
-
-        if (initialBuy) {
-          firstOffer = buyOffer;
-          secondOffer = sellOffer;
-        } else {
-          firstOffer = sellOffer;
-          secondOffer = buyOffer;
-        }
-
-        if (simulation) {
-          handleMessage('Would execute arbitrage if simulation mode was not enabled');
-        } else {
-          await bc.confirmOffer({
-            offerId: firstOffer.offerId,
-          });
-
-          await bc.confirmOffer({
-            offerId: secondOffer.offerId,
-          });
-        }
-
-        lastTrade = Date.now();
-
-        handleMessage(`Success, profit: + ${profit.toFixed(3)}%`);
-        play();
-        if (burst && !bursting && burstsLeft) {
-          console.log(`bursting ${burstsLeft} times`);
-          for(; burstsLeft>0; burstsLeft--) {
-            if (!await tradeCycle(true)) {
-              break;
-            }
-            console.log(`burstsLeft: ${burstsLeft - 1}`);
-          }
-        }
-        return true;
-      } catch (error) {
-        handleMessage('Error on confirm offer', 'error');
-        console.error(error);
-      }
-    } else {
-      if (!bursting) {
-        burstsLeft = Math.min(burstMax, burstsLeft + 1);
-        pollerIndex = (pollerIndex + 1) % (helpers.length + 1);
-        console.log(`next poller ${pollerIndex}`);
-      }
-
-      console.log(`burstsLeft: ${burstsLeft}`);
-    }
   } catch (error) {
     handleMessage('Error on get offer', 'error');
     console.error(error);
+  } finally {
+    pollerIndex = (pollerIndex + 1) % (helpers.length + 1);
+    if (helpers.length) {
+      console.log(`next poller ${pollerIndex}`);
+    }
   }
+
+  if (
+    profit >= minProfitPercent
+  ) {
+    if (!isMain) {
+      if (burstsLeft > 0) {
+        console.log('found arbitrage with helper, reverting to main poller and bursting');
+        pollerIndex = 0;
+        burstsLeft--;
+        await tradeCycle();
+      }
+      return false;
+    }
+    try {
+      let firstOffer, secondOffer;
+
+      if (initialBuy) {
+        firstOffer = buyOffer;
+        secondOffer = sellOffer;
+      } else {
+        firstOffer = sellOffer;
+        secondOffer = buyOffer;
+      }
+
+      if (simulation) {
+        handleMessage('Would execute arbitrage if simulation mode was not enabled');
+      } else {
+        await bc.confirmOffer({
+          offerId: firstOffer.offerId,
+        });
+
+        await bc.confirmOffer({
+          offerId: secondOffer.offerId,
+        });
+      }
+
+      lastTrade = Date.now();
+
+      handleMessage(`Success, profit: + ${profit.toFixed(3)}%`);
+      play();
+      if (burst && !bursting && burstsLeft) {
+        console.log(`bursting ${burstsLeft} times`);
+        while(burstsLeft>0) {
+          --burstsLeft;
+          if (!await tradeCycle(true)) {
+            break;
+          }
+          console.log(`burstsLeft: ${burstsLeft}`);
+        }
+      }
+      return true;
+    } catch (error) {
+      handleMessage('Error on confirm offer', 'error');
+      console.error(error);
+    }
+  } else {
+    if (!bursting) {
+      burstsLeft = Math.min(burstMax, burstsLeft + 1);
+    }
+    console.log(`burstsLeft: ${burstsLeft}`);
+  }
+
   return false;
 }
 
 const startTrading = async () => {
-  handleMessage('Starting trades');
+  let intervalMs = intervalSeconds / (helpers.length + 1) * 1000;
+  handleMessage(`Starting trades every ${intervalMs}ms (keys: ${helpers.length + 1})`);
   await tradeCycle();
-  setInterval(tradeCycle, (intervalSeconds / (helpers.length + 1) * 1000));
+  setInterval(tradeCycle, intervalMs);
 };
 
 // -- UTILITY FUNCTIONS --
@@ -182,7 +199,7 @@ function percent(value1, value2) {
 }
 
 function handleMessage(message, level = 'info', throwError = false) {
-  console.log(`[Biscoint BOT] [${level}] - ${message}`);
+  console.log(`${moment().format('hh:mm:ss.SSS')} [BOT][${level}] ${message}`);
   if (throwError) {
     throw new Error(message);
   }
