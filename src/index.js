@@ -226,4 +226,4 @@ async function start() {
   }
 }
 
-start();
+Promise.await(start());
