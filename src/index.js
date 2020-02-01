@@ -226,4 +226,4 @@ async function start() {
   }
 }
 
-Promise.await(start());
+start().catch(e => handleMessage(e, 'error'));
