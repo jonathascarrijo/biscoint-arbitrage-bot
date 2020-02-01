@@ -226,4 +226,4 @@ async function start() {
   }
 }
 
-start().catch(e => handleMessage(e, 'error'));
+start().catch(e => handleMessage(JSON.stringify(e), 'error'));
