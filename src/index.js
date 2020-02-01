@@ -216,10 +216,14 @@ const play = () => {
 };
 
 async function start() {
-  init();
-  await checkBalances();
-  await checkInterval();
-  await startTrading();
+  try {
+    init();
+    await checkBalances();
+    await checkInterval();
+    await startTrading();
+  } catch (e) {
+    handleMessage(e, 'error');
+  }
 }
 
 start();
