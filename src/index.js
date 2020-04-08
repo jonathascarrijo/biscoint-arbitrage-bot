@@ -7,7 +7,7 @@ import config from './config.js';
 // read the configurations
 let {
   apiKey, apiSecret, amount, amountCurrency, initialBuy, minProfitPercent, intervalSeconds, playSound, burst,
-  simulation, helperKeys,
+  simulation, helperKeys, executeMissedSecondLeg,
 } = config;
 
 // global variables
@@ -72,7 +72,7 @@ const checkInterval = async () => {
   const { windowMs, maxRequests } = endpoints.offer.post.rateLimit;
   handleMessage(`Offer Rate limits: ${maxRequests} request per ${windowMs}ms.`);
 
-  let minInterval = 2 * windowMs / maxRequests / 1000;
+  let minInterval = 2.0 * parseFloat(windowMs) / parseFloat(maxRequests) / 1000.0;
 
   if (!intervalSeconds) {
     intervalSeconds = minInterval;
@@ -86,8 +86,18 @@ const checkInterval = async () => {
   }
 };
 
+let tradeCycleCount = 0;
+
 // Executes an arbitrage cycle
 async function tradeCycle(bursting) {
+  let startedAt = 0;
+  let finishedAt = 0;
+
+  tradeCycleCount += 1;
+  const tradeCycleStartedAt = Date.now();
+
+  handleMessage(`[${tradeCycleCount}] Trade cycle started...`);
+
   let poller, isMain = false;
   if (bursting || pollerIndex === 0) {
     if (helpers.length) {
@@ -101,11 +111,19 @@ async function tradeCycle(bursting) {
   }
   let buyOffer, sellOffer, profit;
   try {
+    startedAt = Date.now();
+
     buyOffer = await poller.offer({
       amount,
       isQuote,
       op: 'buy',
     });
+
+    finishedAt = Date.now();
+
+    handleMessage(`[${tradeCycleCount}] Got buy offer: ${buyOffer.efPrice} (${finishedAt - startedAt} ms)`);
+
+    startedAt = Date.now();
 
     sellOffer = await poller.offer({
       amount,
@@ -113,10 +131,14 @@ async function tradeCycle(bursting) {
       op: 'sell',
     });
 
+    finishedAt = Date.now();
+
+    handleMessage(`[${tradeCycleCount}] Got sell offer: ${sellOffer.efPrice} (${finishedAt - startedAt} ms)`);
+
     profit = percent(buyOffer.efPrice, sellOffer.efPrice);
-    handleMessage(`Calculated profit: ${profit.toFixed(3)}%`);
+    handleMessage(`[${tradeCycleCount}] Calculated profit: ${profit.toFixed(3)}%`);
   } catch (error) {
-    handleMessage('Error on get offer', 'error');
+    handleMessage(`[${tradeCycleCount}] Error on get offer: ${error.error || error.message}`, 'error');
     console.error(error);
   } finally {
     pollerIndex = (pollerIndex + 1) % (helpers.length + 1);
@@ -148,7 +170,7 @@ async function tradeCycle(bursting) {
       }
 
       if (simulation) {
-        handleMessage('Would execute arbitrage if simulation mode was not enabled');
+        handleMessage('[${tradeCycleCount}] Would execute arbitrage if simulation mode was not enabled');
       } else {
         firstLeg = await bc.confirmOffer({
           offerId: firstOffer.offerId,
@@ -159,9 +181,11 @@ async function tradeCycle(bursting) {
         });
       }
 
+      finishedAt = Date.now();
+
       lastTrade = Date.now();
 
-      handleMessage(`Success, profit: + ${profit.toFixed(3)}%`);
+      handleMessage(`[${tradeCycleCount}] Success, profit: + ${profit.toFixed(3)}%`);
       play();
       if (burst && !bursting && burstsLeft) {
         console.log(`bursting ${burstsLeft} times`);
@@ -175,22 +199,27 @@ async function tradeCycle(bursting) {
       }
       return true;
     } catch (error) {
-        handleMessage('Error on confirm offer', 'error');
-        console.error(error);
+      handleMessage(`[${tradeCycleCount}] Error on confirm offer: ${error.error}`, 'error');
+      console.error(error);
 
-        if (firstLeg && !secondLeg) {
-          // probably only one leg of the arbitrage got executed, we have to accept loss and rebalance funds.
-          try {
-            // first we ensure the leg was not actually executed
-            let secondOp = initialBuy ? 'sell' : 'buy';
-            const trades = await bc.trades({ op: secondOp });
-            if (_.find(trades, t => t.offerId === secondOffer.offerId)) {
-              handleMessage('The second leg was executed despite of the error. Good!');
-              return;
-            } else {
-              handleMessage(
-                'Only the first leg of the arbitrage was executed. Trying to execute it at a possible loss.');
-            }
+      if (firstLeg && !secondLeg) {
+        // probably only one leg of the arbitrage got executed, we have to accept loss and rebalance funds.
+        try {
+          // first we ensure the leg was not actually executed
+          let secondOp = initialBuy ? 'sell' : 'buy';
+          const trades = await bc.trades({ op: secondOp });
+          if (_.find(trades, t => t.offerId === secondOffer.offerId)) {
+            handleMessage(`[${tradeCycleCount}] The second leg was executed despite of the error. Good!`);
+          } else if (!executeMissedSecondLeg) {
+            handleMessage(
+              `[${tradeCycleCount}] Only the first leg of the arbitrage was executed, and the ` +
+              'executeMissedSecondLeg is false, so we won\'t execute the second leg.',
+            );
+          } else {
+            handleMessage(
+              `[${tradeCycleCount}] Only the first leg of the arbitrage was executed. ` +
+              'Trying to execute it at a possible loss.',
+            );
             secondLeg = await bc.offer({
               amount,
               isQuote,
@@ -199,13 +228,16 @@ async function tradeCycle(bursting) {
             await bc.confirmOffer({
               offerId: secondLeg.offerId,
             });
-            handleMessage('The second leg was executed and the balance was normalized');
-          } catch (error) {
-            handleMessage('Fatal error. Unable to recover from incomplete arbitrage. Exiting.', 'fatal');
-            await sleep(500);
-            process.exit(1);
+            handleMessage(`[${tradeCycleCount}] The second leg was executed and the balance was normalized`);
           }
+        } catch (error) {
+          handleMessage(
+            `[${tradeCycleCount}] Fatal error. Unable to recover from incomplete arbitrage. Exiting.`, 'fatal',
+          );
+          await sleep(500);
+          process.exit(1);
         }
+      }
     }
   } else {
     if (!bursting) {
@@ -214,15 +246,24 @@ async function tradeCycle(bursting) {
     console.log(`burstsLeft: ${burstsLeft}`);
   }
 
-  return false;
+
+  const tradeCycleFinishedAt = Date.now();
+  const tradeCycleElapsedMs = parseFloat(tradeCycleFinishedAt - tradeCycleStartedAt);
+
+  const intervalMs = intervalSeconds / (helpers.length + 1) * 1000.0;
+  const shouldWaitMs = Math.max(Math.ceil(intervalMs - tradeCycleElapsedMs), 0);
+
+  // handleMessage(`[${cycleCount}] Cycle took ${tradeCycleElapsedMs} ms`);
+
+  // handleMessage(`[${cycleCount}] New cycle in ${shouldWaitMs} ms...`);
+
+  setTimeout(tradeCycle, shouldWaitMs);
 }
 
 // Starts trading, scheduling trades to happen every 'intervalSeconds' seconds.
 const startTrading = async () => {
-  let intervalMs = intervalSeconds / (helpers.length + 1) * 1000;
   handleMessage(`Starting trades every ${intervalMs}ms (keys: ${helpers.length + 1})`);
   await tradeCycle();
-  setInterval(tradeCycle, intervalMs);
 };
 
 // -- UTILITY FUNCTIONS --

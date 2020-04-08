@@ -8,6 +8,7 @@
   "intervalSeconds": null,
   "playSound": false,
   "simulation": true,
+  "executeMissedSecondLeg": true,
   "helperKeys": [
     {
       "apiKey": "paste-helper-api-key",

@@ -15,6 +15,7 @@ const config = {
   burst: true,
   simulation: true,
   helperKeys: [],
+  executeMissedSecondLeg: true,
 };
 
 try {
