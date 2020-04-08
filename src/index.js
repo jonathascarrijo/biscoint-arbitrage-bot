@@ -11,7 +11,7 @@ let {
 } = config;
 
 // global variables
-let bc, lastTrade = 0, isQuote, helpers = [], pollerIndex = 0, balances;
+let bc, lastTrade = 0, isQuote, helpers = [], pollerIndex = 0, balances, intervalMs;
 
 // Initializes the Biscoint API connector object.
 const init = () => {
@@ -84,6 +84,7 @@ const checkInterval = async () => {
     burstsLeft = burstMax;
     console.log(`burstMax: ${burstMax}`);
   }
+  intervalMs = intervalSeconds / (helpers.length + 1) * 1000.0;
 };
 
 let tradeCycleCount = 0;
@@ -249,8 +250,6 @@ async function tradeCycle(bursting) {
 
   const tradeCycleFinishedAt = Date.now();
   const tradeCycleElapsedMs = parseFloat(tradeCycleFinishedAt - tradeCycleStartedAt);
-
-  const intervalMs = intervalSeconds / (helpers.length + 1) * 1000.0;
   const shouldWaitMs = Math.max(Math.ceil(intervalMs - tradeCycleElapsedMs), 0);
 
   // handleMessage(`[${cycleCount}] Cycle took ${tradeCycleElapsedMs} ms`);
@@ -277,7 +276,7 @@ function percent(value1, value2) {
 }
 
 function handleMessage(message, level = 'info', throwError = false) {
-  console.log(`${moment().format('hh:mm:ss.SSS')} [BOT][${level}] ${message}`);
+  console.log(`${moment().format('hh:mm:ss.SSS')} [BOT][${level}] ${typeof message === 'string' ? message :  JSON.stringify(message)}`);
   if (throwError) {
     throw new Error(message);
   }
