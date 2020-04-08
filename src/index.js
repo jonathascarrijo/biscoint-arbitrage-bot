@@ -35,7 +35,8 @@ const init = () => {
 
   bc = new Biscoint({
     apiKey: config.apiKey,
-    apiSecret: config.apiSecret
+    apiSecret: config.apiSecret,
+    apiUrl: config.apiUrl,
   });
 
   _.each(helperKeys, (hk) => {
