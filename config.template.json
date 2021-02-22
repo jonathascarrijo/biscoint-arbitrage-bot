@@ -7,5 +7,12 @@
   "minProfitPercent": 0.02,
   "intervalSeconds": null,
   "playSound": false,
-  "simulation": false
+  "simulation": true,
+  "executeMissedSecondLeg": true,
+  "helperKeys": [
+    {
+      "apiKey": "paste-helper-api-key",
+      "apiSecret": "paste-helper-api-secret"
+    }
+  ]
 }

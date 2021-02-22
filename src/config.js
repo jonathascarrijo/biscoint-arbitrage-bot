@@ -12,7 +12,10 @@ const config = {
   // specify null to let the bot calculate the minimum allowed interval
   intervalSeconds: null,
   playSound: false,
-  simulation: false,
+  burst: true,
+  simulation: true,
+  helperKeys: [],
+  executeMissedSecondLeg: true,
 };
 
 try {
